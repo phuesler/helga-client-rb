@@ -16,12 +16,17 @@ EM.run {
 
   ws.onopen = lambda do |event|
     p [:open]
-    init_hash = {
+    ws.send(JSON.generate({
         :token => "developer token",
         :command => :subscribe,
         :params => {:channel => "backend"}
-    }
-    ws.send(JSON.generate(init_hash))
+    }))
+
+    #ws.send(JSON.generate({
+        #:token => "developer token",
+        #:command => :unsubscribe,
+        #:params => {:channel => "backend"}
+    #}))
   end
 
   ws.onmessage = lambda do |event|

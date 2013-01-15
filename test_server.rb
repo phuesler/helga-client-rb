@@ -3,9 +3,7 @@ require "bundler/setup"
 require "em-websocket"
 require "json"
 
-EventMachine.run do
-
-  COMMANDS = {
+COMMANDS = {
   "subscribe" => lambda do |ws, user_id, params|
     channel = params["channel"]
     if SUBSCRIBERS.has_key? channel
@@ -14,8 +12,8 @@ EventMachine.run do
         :sid => SUBSCRIBERS[channel].subscribe{|msg| ws.send msg}
       }
       SUBSCRIBERS[channel].push JSON.generate({
-        :command => "ack",
-        :params => {:status => "OK"}
+        :command => "info",
+        :params => {:message => "client #{user_id} joined"}
       })
     end
   end,
@@ -26,7 +24,11 @@ EventMachine.run do
       c[:name] == channel
     end
     if subscription
-      SUBSCRIBERS[:channel].unsubscribe subscription[:sid]
+      SUBSCRIBERS[subscription[:name]].unsubscribe subscription[:sid]
+      SUBSCRIBERS[channel].push JSON.generate({
+        :command => "info",
+        :params => {:message => "client #{user_id} left"}
+      })
     end
   end
 }
@@ -37,6 +39,10 @@ SUBSCRIBERS = {
 }
 
 CONNECTIONS = {}
+
+
+EventMachine.run do
+
 
   EventMachine::WebSocket.start(:host => "0.0.0.0", :port => 8080) do |ws|
     connectionIdentifier = rand(1000000).to_s;
@@ -60,8 +66,6 @@ CONNECTIONS = {}
         message = JSON.parse(msg)
         command = COMMANDS[message["command"]]
         break unless command
-        puts connectionIdentifier.inspect
-        puts message.inspect
         command.call(ws, connectionIdentifier, message["params"])
       rescue Exception => e
         puts e.inspect
