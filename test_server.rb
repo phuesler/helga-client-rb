@@ -4,38 +4,44 @@ require "em-websocket"
 require "json"
 
 COMMANDS = {
-  "subscribe" => lambda do |ws, user_id, params|
+  "subscribe" => lambda do |ws, user, params|
     channel = params["channel"]
     if SUBSCRIBERS.has_key? channel
-      CONNECTIONS[user_id][:channels] << {
+      user[:channels] << {
         :name => channel,
         :sid => SUBSCRIBERS[channel].subscribe{|msg| ws.send msg}
       }
       SUBSCRIBERS[channel].push JSON.generate({
         :command => "info",
-        :params => {:message => "client #{user_id} joined"}
+        :params => {:message => "client #{user[:nick]} subscribed to #{channel}"}
       })
     end
   end,
 
-  "unsubscribe" => lambda do |ws, user_id, params|
+  "unsubscribe" => lambda do |ws, user, params|
     channel = params["channel"]
-    subscription = CONNECTIONS[user_id][:channels].find do |c|
+    subscription = user[:channels].find do |c|
       c[:name] == channel
     end
     if subscription
       SUBSCRIBERS[subscription[:name]].unsubscribe subscription[:sid]
       SUBSCRIBERS[channel].push JSON.generate({
         :command => "info",
-        :params => {:message => "client #{user_id} left"}
+        :params => {:message => "client #{user[:nick]} unsubscribed from #{channel}"}
       })
     end
+  end,
+
+  "registerNick" => lambda do |ws, user, params|
+    user[:nick] = params[:name]
   end
+
 }
 
 SUBSCRIBERS = {
   "backend" => EventMachine::Channel.new,
-  "frontend" => EventMachine::Channel.new
+  "frontend" => EventMachine::Channel.new,
+  "all" => EventMachine::Channel.new
 }
 
 CONNECTIONS = {}
@@ -48,17 +54,35 @@ EventMachine.run do
     connectionIdentifier = rand(1000000).to_s;
     ws.onopen {
       puts "WebSocket connection open"
-      CONNECTIONS[connectionIdentifier] = {:channels => []};
-      response = {
-        :command => :status,
-        :params => {
-          :channels => [:backend, :frontend]
+      CONNECTIONS[connectionIdentifier] = {
+        :nick => connectionIdentifier,
+        :channels => [
+          {
+            :name => "all",
+            :sid => SUBSCRIBERS["all"].subscribe{|msg| ws.send msg}
+          }
+        ]};
+        response = {
+          :command => :status,
+          :params => {
+            :channels => [:backend, :frontend]
+          }
         }
-      }
-      ws.send JSON.generate(response)
+        ws.send JSON.generate(response)
     }
 
-    ws.onclose { puts "Connection closed" }
+    ws.onclose {
+      CONNECTIONS[connectionIdentifier][:channels].each do |subscription|
+        SUBSCRIBERS[subscription[:name]].unsubscribe subscription[:sid]
+      end
+      CONNECTIONS.delete connectionIdentifier
+      SUBSCRIBERS["all"].push JSON.generate({
+        :command => "info",
+        :params => {:message => "client #{connectionIdentifier} left"}
+      })
+
+      puts "Connection closed"
+    }
     ws.onmessage { |msg|
       puts "Received message: #{msg}"
       message = nil
@@ -66,7 +90,7 @@ EventMachine.run do
         message = JSON.parse(msg)
         command = COMMANDS[message["command"]]
         break unless command
-        command.call(ws, connectionIdentifier, message["params"])
+        command.call(ws, CONNECTIONS[connectionIdentifier], message["params"])
       rescue Exception => e
         puts e.inspect
         puts "Message could not be parsed as JSON"

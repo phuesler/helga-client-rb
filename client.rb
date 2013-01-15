@@ -22,6 +22,12 @@ EM.run {
         :params => {:channel => "backend"}
     }))
 
+    ws.send(JSON.generate({
+        :token => "developer token",
+        :command => :registerNick,
+        :params => {:name => "myAwesomeBot#{rand(1000).to_s}"}
+    }))
+
     #ws.send(JSON.generate({
         #:token => "developer token",
         #:command => :unsubscribe,
